@@ -24,81 +24,75 @@ struct Config {
     pub device_id: String,
 }
 
-#[derive(Debug)]
-struct Value<T> {
-    sensor: T,
-    index: u8,
-}
-
-#[derive(Debug)]
-enum Measurement {
+#[derive(Debug, Deserialize)]
+enum MeasurementType {
     // Sensor: "temp"
     // Description: "Temperature"
     // Units: ˚C
     // Units Description: "degrees Celsius"
     // Range: -40–185
-    Temperature(Value<i16>),
+    #[serde(rename = "temp")]
+    Temperature,
 
     // Sensor: "humid"
     // Description: "Relative Humidity"
     // Units: %
     // Units Description: "relateive humidity (RH%)"
     // Range: 0 – 100
-    Humidity(Value<u8>),
+    #[serde(rename = "humid")]
+    Humidity,
 
     // Sensor: "co2"
     // Description: "Carbon Dioxide (CO₂)"
     // Units: ppm
     // Units Description: "parts per million"
     // Range: 0 – 5,000
-    CO2(Value<u16>),
+    #[serde(rename = "co2")]
+    CO2,
 
     // Sensor: "voc"
     // Description: "Total Volatile Organic Compounds (TVOCs)"
     // Units: ppb
     // Units Description: "parts per billion"
     // Range: 20 – 60,000
-    VOC(Value<u16>),
+    #[serde(rename = "voc")]
+    VOC,
 
     // Sensor: "dust"
     // Description: "Particulate Matter (PM - Aggregate Dust)"
     // Units: μg/m³
     // Units Description: "relateive humidity (RH%)"
     // Range: 0 – 250
-    Dust(Value<u8>),
+    #[serde(rename = "dust")]
+    Dust,
 
     // Sensor: "pm25"
     // Description: "Particulate Matter (PM2.5 - Fine Dust)"
     // Units: μg/m³
     // Units Description: "relateive humidity (RH%)"
     // Range: 0 – 1,000
-    PM25(Value<u16>),
-}
-
-#[derive(Debug)]
-struct DataPoint {
-    timestamp: DateTime<Utc>,
-    // score: u8,
-    // measurements: Box<[Measurement]>
+    #[serde(rename = "pm25")]
+    PM25,
 }
 
 #[derive(Debug, Deserialize)]
-struct AwairMeasurement {
-    comp: String,
+struct Measurement {
+    #[serde(rename = "comp")]
+    comp: MeasurementType,
     value: f64,
 }
 
 #[derive(Debug, Deserialize)]
-struct AwairDataPoint {
+struct DataPoint {
     timestamp: DateTime<Utc>,
     score: f64,
-    sensors: Box<[AwairMeasurement]>,
-    indices: Box<[AwairMeasurement]>,
+    sensors: Box<[Measurement]>,
+    indices: Box<[Measurement]>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Response {
-    data: Box<[AwairDataPoint]>
+    data: Box<[DataPoint]>
 }
 
 #[derive(Debug)]
