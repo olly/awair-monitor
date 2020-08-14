@@ -9,6 +9,7 @@ extern crate log;
 
 use chrono::{DateTime, Duration, SecondsFormat, TimeZone, Utc};
 use envconfig::Envconfig;
+use failure::Fail;
 use serde::Deserialize;
 use reqwest::{StatusCode, Url};
 
@@ -22,9 +23,21 @@ struct Config {
 
     #[envconfig(from = "AWAIR_DEVICE_ID")]
     pub device_id: String,
+
+    #[envconfig(from = "INFLUX_DB_URL")]
+    pub influx_db_url: String,
+
+    #[envconfig(from = "INFLUX_DB_USERNAME")]
+    pub influx_db_username: Option<String>,
+
+    #[envconfig(from = "INFLUX_DB_PASSWORD")]
+    pub influx_db_password: Option<String>,
+
+    #[envconfig(from = "INFLUX_DB_DATABASE")]
+    pub influx_db_database: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Eq, Hash, PartialEq)]
 enum MeasurementType {
     // Sensor: "temp"
     // Description: "Temperature"
@@ -75,10 +88,23 @@ enum MeasurementType {
     PM25,
 }
 
+impl MeasurementType {
+    fn field_name(&self) -> &'static str {
+        match self {
+            MeasurementType::Temperature => "temperature",
+            MeasurementType::Humidity => "humidity",
+            MeasurementType::CO2 => "CO2",
+            MeasurementType::VOC => "VOC",
+            MeasurementType::Dust => "dust",
+            MeasurementType::PM25 => "PM25",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct Measurement {
     #[serde(rename = "comp")]
-    comp: MeasurementType,
+    kind: MeasurementType,
     value: f64,
 }
 
@@ -97,7 +123,7 @@ struct Response {
 
 #[derive(Debug)]
 struct InvalidResponse {
-    response: reqwest::blocking::Response
+    response: reqwest::Response
 }
 
 impl Display for InvalidResponse {
@@ -118,7 +144,7 @@ fn latest_complete_five_second_period() -> (DateTime<Utc>, DateTime<Utc>) {
     (lower, upper)
 }
 
-fn run(config: Config) -> Result<(), Box<dyn Error>> {
+async fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let (from, to) = latest_complete_five_second_period();
     debug!("fetching data from: {} to: {}", from, to);
 
@@ -130,29 +156,56 @@ fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     let url = Url::parse_with_params(&endpoint, &params)?;
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let request = client.get(url).bearer_auth(config.api_key);
 
-    let response = request.send()?;
+    let response = request.send().await?;
 
     if response.status() != StatusCode::OK {
         return Err(Box::new(InvalidResponse { response }))
     }
 
-    let payload: Response = response.json()?;
+    let payload: Response = response.json().await?;
 
-    println!("{:?}", payload);
+    let mut influxdb_client = influxdb::Client::new(&config.influx_db_url, &config.influx_db_database);
+
+    if let Some(username) = config.influx_db_username.as_ref() {
+        let password = config.influx_db_password.unwrap_or_else(|| "".to_string());
+        influxdb_client = influxdb_client.with_auth(username, password);
+    }
+
+    for measurement in payload.data.iter() {
+        let mut influxdb_measurement = influxdb::WriteQuery::new(measurement.timestamp.into(), "awair");
+
+        influxdb_measurement = influxdb_measurement.add_field("score", measurement.score);
+
+        for sensor_measurement in measurement.sensors.iter() {
+            let name = format!("{}.sensor", sensor_measurement.kind.field_name());
+            influxdb_measurement = influxdb_measurement.add_field(name, sensor_measurement.value);
+        }
+
+        for index_measurement in measurement.indices.iter() {
+            let name = format!("{}.index", index_measurement.kind.field_name());
+            influxdb_measurement = influxdb_measurement.add_field(name, index_measurement.value);
+        }
+
+        influxdb_measurement = influxdb_measurement.add_tag("device_id", config.device_id.to_string());
+        influxdb_client.query(&influxdb_measurement).await.map_err(|err| err.compat())?;
+    }
 
     Ok(())
 }
-fn main() {
+
+#[tokio::main]
+async fn main() {
     pretty_env_logger::init();
 
-    let result: Result<(), Box<dyn Error>> = Config::init()
-        .map_err(|err| Box::new(err) as Box<dyn Error>)
-        .and_then(|config| {
-            run(config)
-        });
+    let config = Config::init().unwrap_or_else(|err| {
+        error!("{}", err);
+        exit(1)
+    });
+
+    let result = run(config).await;
 
     match result {
         Ok(_) => exit(0),
