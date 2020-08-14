@@ -10,6 +10,7 @@ extern crate log;
 use chrono::{DateTime, Duration, SecondsFormat, TimeZone, Utc};
 use envconfig::Envconfig;
 use failure::Fail;
+use futures::TryFutureExt;
 use serde::Deserialize;
 use reqwest::{StatusCode, Url};
 
@@ -196,16 +197,17 @@ async fn run(config: Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+async fn load_config() -> Result<Config, Box<dyn Error>> {
+    Config::init().map_err(|err| Box::new(err) as Box<dyn Error>)
+}
+
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
 
-    let config = Config::init().unwrap_or_else(|err| {
-        error!("{}", err);
-        exit(1)
-    });
-
-    let result = run(config).await;
+    let result = load_config().and_then(|config| {
+        run(config)
+    }).await;
 
     match result {
         Ok(_) => exit(0),

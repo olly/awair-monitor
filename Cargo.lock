@@ -49,6 +49,7 @@ dependencies = [
  "envconfig",
  "envconfig_derive",
  "failure",
+ "futures",
  "influxdb",
  "log",
  "pretty_env_logger",
