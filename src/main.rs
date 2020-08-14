@@ -31,8 +31,8 @@ struct Config {
     #[envconfig(from = "INFLUX_DB_USERNAME")]
     pub influx_db_username: Option<String>,
 
-    #[envconfig(from = "INFLUX_DB_PASSWORD")]
-    pub influx_db_password: Option<String>,
+    #[envconfig(from = "INFLUX_DB_PASSWORD", default = "")]
+    pub influx_db_password: String,
 
     #[envconfig(from = "INFLUX_DB_DATABASE")]
     pub influx_db_database: String,
@@ -145,37 +145,15 @@ fn latest_complete_five_second_period() -> (DateTime<Utc>, DateTime<Utc>) {
     (lower, upper)
 }
 
-async fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    let (from, to) = latest_complete_five_second_period();
-    debug!("fetching data from: {} to: {}", from, to);
-
-    let endpoint = format!("https://developer-apis.awair.is/v1/users/self/devices/{}/{}/air-data/raw", config.device_type, config.device_id);
-    let params = [
-        ("from", from.to_rfc3339_opts(SecondsFormat::Secs, true)),
-        ("to", to.to_rfc3339_opts(SecondsFormat::Secs, true)),
-    ];
-
-    let url = Url::parse_with_params(&endpoint, &params)?;
-
-    let client = reqwest::Client::new();
-    let request = client.get(url).bearer_auth(config.api_key);
-
-    let response = request.send().await?;
-
-    if response.status() != StatusCode::OK {
-        return Err(Box::new(InvalidResponse { response }))
-    }
-
-    let payload: Response = response.json().await?;
-
+async fn post_to_influxdb<'a, I: Iterator<Item=&'a DataPoint>>(config: Config, measurements: I) -> Result<(), Box<dyn Error>> {
     let mut influxdb_client = influxdb::Client::new(&config.influx_db_url, &config.influx_db_database);
 
-    if let Some(username) = config.influx_db_username.as_ref() {
-        let password = config.influx_db_password.unwrap_or_else(|| "".to_string());
+    if let Some(username) = config.influx_db_username {
+        let password = config.influx_db_password;
         influxdb_client = influxdb_client.with_auth(username, password);
     }
 
-    for measurement in payload.data.iter() {
+    for measurement in measurements {
         let mut influxdb_measurement = influxdb::WriteQuery::new(measurement.timestamp.into(), "awair");
 
         influxdb_measurement = influxdb_measurement.add_field("score", measurement.score);
@@ -190,9 +168,36 @@ async fn run(config: Config) -> Result<(), Box<dyn Error>> {
             influxdb_measurement = influxdb_measurement.add_field(name, index_measurement.value);
         }
 
-        influxdb_measurement = influxdb_measurement.add_tag("device_id", config.device_id.to_string());
+        influxdb_measurement = influxdb_measurement.add_tag("device_id", config.device_id.clone());
         influxdb_client.query(&influxdb_measurement).await.map_err(|err| err.compat())?;
     }
+    Ok(())
+}
+
+async fn run(config: Config) -> Result<(), Box<dyn Error>> {
+    let (from, to) = latest_complete_five_second_period();
+    debug!("fetching data from: {} to: {}", from, to);
+
+    let endpoint = format!("https://developer-apis.awair.is/v1/users/self/devices/{}/{}/air-data/raw", config.device_type, config.device_id);
+    let params = [
+        ("from", from.to_rfc3339_opts(SecondsFormat::Secs, true)),
+        ("to", to.to_rfc3339_opts(SecondsFormat::Secs, true)),
+    ];
+
+    let url = Url::parse_with_params(&endpoint, &params)?;
+
+    let client = reqwest::Client::new();
+    let request = client.get(url).bearer_auth(&config.api_key);
+
+    let response = request.send().await?;
+
+    if response.status() != StatusCode::OK {
+        return Err(Box::new(InvalidResponse { response }))
+    }
+
+    let payload: Response = response.json().await?;
+
+    post_to_influxdb(config, payload.data.iter()).await?;
 
     Ok(())
 }
