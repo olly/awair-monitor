@@ -11,6 +11,8 @@ use chrono::{DateTime, Duration, SecondsFormat, TimeZone, Utc};
 use envconfig::Envconfig;
 use failure::Fail;
 use futures::TryFutureExt;
+use futures::stream;
+use futures::stream::StreamExt;
 use serde::Deserialize;
 use reqwest::{StatusCode, Url};
 
@@ -148,12 +150,14 @@ fn latest_complete_five_second_period() -> (DateTime<Utc>, DateTime<Utc>) {
 async fn post_to_influxdb<'a, I: Iterator<Item=&'a DataPoint>>(config: Config, measurements: I) -> Result<(), Box<dyn Error>> {
     let mut influxdb_client = influxdb::Client::new(&config.influx_db_url, &config.influx_db_database);
 
-    if let Some(username) = config.influx_db_username {
-        let password = config.influx_db_password;
+    if let Some(username) = config.influx_db_username.as_ref().cloned() {
+        let password = config.influx_db_password.clone();
         influxdb_client = influxdb_client.with_auth(username, password);
     }
 
-    for measurement in measurements {
+    let influx_db_client = &influxdb_client;
+
+    let influx_db_measurements = stream::iter(measurements.into_iter().map(|measurement| {
         let mut influxdb_measurement = influxdb::WriteQuery::new(measurement.timestamp.into(), "awair");
 
         influxdb_measurement = influxdb_measurement.add_field("score", measurement.score);
@@ -168,9 +172,15 @@ async fn post_to_influxdb<'a, I: Iterator<Item=&'a DataPoint>>(config: Config, m
             influxdb_measurement = influxdb_measurement.add_field(name, index_measurement.value);
         }
 
-        influxdb_measurement = influxdb_measurement.add_tag("device_id", config.device_id.clone());
-        influxdb_client.query(&influxdb_measurement).await.map_err(|err| err.compat())?;
-    }
+        let device_id = config.device_id.clone();
+        influxdb_measurement = influxdb_measurement.add_tag("device_id", device_id);
+        influxdb_measurement
+    }));
+
+    influx_db_measurements.for_each_concurrent(10, |measurement| async move {
+        influx_db_client.query(&measurement).await;
+    }).await;
+
     Ok(())
 }
 
