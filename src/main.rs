@@ -27,16 +27,16 @@ struct Config {
     #[envconfig(from = "AWAIR_DEVICE_ID")]
     pub device_id: String,
 
-    #[envconfig(from = "INFLUX_DB_URL")]
+    #[envconfig(from = "INFLUXDB_URL")]
     pub influx_db_url: String,
 
-    #[envconfig(from = "INFLUX_DB_USERNAME")]
+    #[envconfig(from = "INFLUXDB_USERNAME")]
     pub influx_db_username: Option<String>,
 
-    #[envconfig(from = "INFLUX_DB_PASSWORD", default = "")]
+    #[envconfig(from = "INFLUXDB_PASSWORD", default = "")]
     pub influx_db_password: String,
 
-    #[envconfig(from = "INFLUX_DB_DATABASE")]
+    #[envconfig(from = "INFLUXDB_DATABASE")]
     pub influx_db_database: String,
 }
 
