@@ -10,11 +10,11 @@ extern crate log;
 use chrono::{DateTime, Duration, SecondsFormat, TimeZone, Utc};
 use envconfig::Envconfig;
 use failure::Fail;
-use futures::TryFutureExt;
 use futures::stream;
 use futures::stream::{StreamExt, TryStreamExt};
-use serde::Deserialize;
+use futures::TryFutureExt;
 use reqwest::{StatusCode, Url};
+use serde::Deserialize;
 
 #[derive(Envconfig)]
 struct Config {
@@ -121,12 +121,12 @@ struct DataPoint {
 
 #[derive(Debug, Deserialize)]
 struct Response {
-    data: Box<[DataPoint]>
+    data: Box<[DataPoint]>,
 }
 
 #[derive(Debug)]
 struct InvalidResponse {
-    response: reqwest::Response
+    response: reqwest::Response,
 }
 
 impl Display for InvalidResponse {
@@ -147,8 +147,12 @@ fn latest_complete_five_second_period() -> (DateTime<Utc>, DateTime<Utc>) {
     (lower, upper)
 }
 
-async fn post_to_influxdb<'a, I: Iterator<Item=&'a DataPoint>>(config: Config, measurements: I) -> Result<(), Box<dyn Error>> {
-    let mut influxdb_client = influxdb::Client::new(&config.influx_db_url, &config.influx_db_database);
+async fn post_to_influxdb<'a, I: Iterator<Item = &'a DataPoint>>(
+    config: Config,
+    measurements: I,
+) -> Result<(), Box<dyn Error>> {
+    let mut influxdb_client =
+        influxdb::Client::new(&config.influx_db_url, &config.influx_db_database);
 
     if let Some(username) = config.influx_db_username.as_ref().cloned() {
         let password = config.influx_db_password.clone();
@@ -158,7 +162,8 @@ async fn post_to_influxdb<'a, I: Iterator<Item=&'a DataPoint>>(config: Config, m
     let influx_db_client = &influxdb_client;
 
     let influx_db_measurements = measurements.map(|measurement| {
-        let mut influxdb_measurement = influxdb::WriteQuery::new(measurement.timestamp.into(), "awair");
+        let mut influxdb_measurement =
+            influxdb::WriteQuery::new(measurement.timestamp.into(), "awair");
 
         influxdb_measurement = influxdb_measurement.add_field("score", measurement.score);
 
@@ -177,19 +182,26 @@ async fn post_to_influxdb<'a, I: Iterator<Item=&'a DataPoint>>(config: Config, m
         influxdb_measurement
     });
 
-    stream::iter(influx_db_measurements).map(Ok).try_for_each_concurrent(10, |measurement| async move {
-        influx_db_client.query(&measurement)
-                        .await
-                        .map(|_| ())
-                        .map_err(|err| Box::new(err.compat()) as Box<dyn Error>)
-    }).await
+    stream::iter(influx_db_measurements)
+        .map(Ok)
+        .try_for_each_concurrent(10, |measurement| async move {
+            influx_db_client
+                .query(&measurement)
+                .await
+                .map(|_| ())
+                .map_err(|err| Box::new(err.compat()) as Box<dyn Error>)
+        })
+        .await
 }
 
 async fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let (from, to) = latest_complete_five_second_period();
     debug!("fetching data from: {} to: {}", from, to);
 
-    let endpoint = format!("https://developer-apis.awair.is/v1/users/self/devices/{}/{}/air-data/raw", config.device_type, config.device_id);
+    let endpoint = format!(
+        "https://developer-apis.awair.is/v1/users/self/devices/{}/{}/air-data/raw",
+        config.device_type, config.device_id
+    );
     let params = [
         ("from", from.to_rfc3339_opts(SecondsFormat::Secs, true)),
         ("to", to.to_rfc3339_opts(SecondsFormat::Secs, true)),
@@ -203,7 +215,7 @@ async fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let response = request.send().await?;
 
     if response.status() != StatusCode::OK {
-        return Err(Box::new(InvalidResponse { response }))
+        return Err(Box::new(InvalidResponse { response }));
     }
 
     let payload: Response = response.json().await?;
@@ -221,9 +233,7 @@ async fn load_config() -> Result<Config, Box<dyn Error>> {
 async fn main() {
     pretty_env_logger::init();
 
-    let result = load_config().and_then(|config| {
-        run(config)
-    }).await;
+    let result = load_config().and_then(|config| run(config)).await;
 
     match result {
         Ok(_) => exit(0),
