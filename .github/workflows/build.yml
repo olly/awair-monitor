@@ -18,7 +18,7 @@ jobs:
           command: check
 
   test:
-    name: Test Suite
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -30,6 +30,26 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+      - uses: actions/upload-artifact@v2
+        with:
+          name: awair-monitor_linux_amd64
+          path: target/release/awair-monitor
+
 
   fmt:
     name: Rustfmt
