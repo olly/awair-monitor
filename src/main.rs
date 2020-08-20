@@ -1,3 +1,5 @@
+#![warn(clippy)]
+
 use std::error::Error;
 use std::fmt::Display;
 use std::process::exit;
@@ -233,7 +235,7 @@ async fn load_config() -> Result<Config, Box<dyn Error>> {
 async fn main() {
     pretty_env_logger::init();
 
-    let result = load_config().and_then(|config| run(config)).await;
+    let result = load_config().and_then(run).await;
 
     match result {
         Ok(_) => exit(0),
