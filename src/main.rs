@@ -12,7 +12,7 @@ use envconfig::Envconfig;
 use failure::Fail;
 use futures::TryFutureExt;
 use futures::stream;
-use futures::stream::StreamExt;
+use futures::stream::{StreamExt, TryStreamExt};
 use serde::Deserialize;
 use reqwest::{StatusCode, Url};
 
@@ -157,7 +157,7 @@ async fn post_to_influxdb<'a, I: Iterator<Item=&'a DataPoint>>(config: Config, m
 
     let influx_db_client = &influxdb_client;
 
-    let influx_db_measurements = stream::iter(measurements.into_iter().map(|measurement| {
+    let influx_db_measurements = measurements.into_iter().map(|measurement| {
         let mut influxdb_measurement = influxdb::WriteQuery::new(measurement.timestamp.into(), "awair");
 
         influxdb_measurement = influxdb_measurement.add_field("score", measurement.score);
@@ -175,13 +175,14 @@ async fn post_to_influxdb<'a, I: Iterator<Item=&'a DataPoint>>(config: Config, m
         let device_id = config.device_id.clone();
         influxdb_measurement = influxdb_measurement.add_tag("device_id", device_id);
         influxdb_measurement
-    }));
+    });
 
-    influx_db_measurements.for_each_concurrent(10, |measurement| async move {
-        influx_db_client.query(&measurement).await;
-    }).await;
-
-    Ok(())
+    stream::iter(influx_db_measurements).map(Ok).try_for_each_concurrent(10, |measurement| async move {
+        influx_db_client.query(&measurement)
+                        .await
+                        .map(|_| ())
+                        .map_err(|err| Box::new(err.compat()) as Box<dyn Error>)
+    }).await
 }
 
 async fn run(config: Config) -> Result<(), Box<dyn Error>> {
