@@ -1,4 +1,4 @@
-#![warn(clippy)]
+#![warn(clippy:all)]
 
 use std::error::Error;
 use std::fmt::Display;
