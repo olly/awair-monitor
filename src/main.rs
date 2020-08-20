@@ -157,7 +157,7 @@ async fn post_to_influxdb<'a, I: Iterator<Item=&'a DataPoint>>(config: Config, m
 
     let influx_db_client = &influxdb_client;
 
-    let influx_db_measurements = measurements.into_iter().map(|measurement| {
+    let influx_db_measurements = measurements.map(|measurement| {
         let mut influxdb_measurement = influxdb::WriteQuery::new(measurement.timestamp.into(), "awair");
 
         influxdb_measurement = influxdb_measurement.add_field("score", measurement.score);
